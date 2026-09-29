@@ -37,6 +37,17 @@ jobs:
       - name: Verify
         run: make verify
 
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          export KUBECONFIG=$HOME/.kube/k3d-gpu-slice.yaml
+          kubectl get nodes -o wide || true
+          kubectl describe nodes | grep -A12 '^Conditions' || true
+          kubectl get pods -A -o wide || true
+          for n in server-0 agent-0; do
+            echo "--- k3d-gpu-slice-$n (last 40 lines)"; docker logs k3d-gpu-slice-$n 2>&1 | tail -40
+          done
+
       - name: Destroy
         if: always()
         run: make destroy
