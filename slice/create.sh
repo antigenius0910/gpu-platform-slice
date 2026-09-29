@@ -3,7 +3,7 @@
 # Re-runnable: each step converges on the desired state instead of assuming a
 # fresh machine, so running it against an existing cluster changes nothing.
 set -euo pipefail
-source "$(dirname "$0")/lib.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 # The k3d default (k3s v1.31) is four minors behind current kubectl, outside the
 # supported skew. Pin it here, not in a README caveat.
@@ -65,7 +65,7 @@ advertise_fake_gpus() {
     [ "$i" = 60 ] && die "nvidia.com/gpu never became allocatable"
     sleep 1
   done
-  kubectl get nodes -L "$POOL_LABEL" \
+  kubectl get nodes \
     -o custom-columns='NODE:.metadata.name,POOL:.metadata.labels.platform\.example\.com/compute-pool,GPU:.status.allocatable.nvidia\.com/gpu'
 }
 

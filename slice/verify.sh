@@ -12,7 +12,7 @@
 # an event message, not a pod phase; a Preempted event, not status Evicted;
 # both halves of a quota error, not either one.
 set -uo pipefail # no -e: a failed assertion is recorded, and the next case still runs
-source "$(dirname "$0")/lib.sh"
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 CASES=(quota capacity preemption network overflow escalation)
 TENANTS=(research release-evals inference-eval)
@@ -360,6 +360,10 @@ run_case() {
   converge
   printf '    (%ss)\n' "$((SECONDS - t0))"
 }
+
+# Sourcing this file loads the helpers (pod_yaml, converge, ...) without running
+# any case, for trying a prediction by hand.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 selected=("$@")
 [ ${#selected[@]} -gt 0 ] || selected=("${CASES[@]}")
