@@ -19,7 +19,7 @@ jobs:
       run:
         working-directory: slice
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install k3d v5.8.3 (pinned release binary, no install script)
         run: |
