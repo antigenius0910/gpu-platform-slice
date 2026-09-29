@@ -1,0 +1,7 @@
+# Entitlement for the research team. Changing any value here is a request for
+# more (or less) platform capacity; CODEOWNERS routes it to the platform team.
+name: research
+gpuCap: 4
+tier: low
+computePool: any
+networkIsolation: namespace

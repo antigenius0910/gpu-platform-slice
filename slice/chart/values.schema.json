@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Tenant entitlement",
+  "description": "What a team is entitled to. Abstract on purpose: no Kubernetes object names.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "gpuCap", "tier", "computePool", "networkIsolation"],
+  "properties": {
+    "name": {
+      "description": "Team name. Becomes the namespace name, so it must be a DNS label.",
+      "type": "string",
+      "pattern": "^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$"
+    },
+    "gpuCap": {
+      "description": "Ceiling on concurrently requested nvidia.com/gpu. A ceiling, not a reservation.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 64
+    },
+    "tier": {
+      "description": "Priority under contention. Mapped to a PriorityClass inside the chart (templates/_helpers.tpl).",
+      "enum": ["low", "high"]
+    },
+    "computePool": {
+      "description": "any = prefer datacenter, spill to cloud. datacenter | cloud = required, never spills.",
+      "enum": ["any", "datacenter", "cloud"]
+    },
+    "networkIsolation": {
+      "description": "namespace = ingress only from the same namespace. The only mode built; new modes are how exceptions become capabilities.",
+      "enum": ["namespace"]
+    }
+  }
+}

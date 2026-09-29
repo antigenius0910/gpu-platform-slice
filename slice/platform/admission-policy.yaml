@@ -1,0 +1,58 @@
+# Enforces the two entitlements a pod could otherwise claim for itself:
+#   1. priority: denying "create priorityclass" stops a tenant minting a tier,
+#      but not borrowing an existing one. A research pod could name tenant-high.
+#   2. pool: a pinned tenant must not land outside its pool.
+# One built-in CEL policy covers every tenant namespace (no webhook, no
+# per-tenant code). It reads the labels the tenant chart writes on the
+# namespace, which tenants cannot edit.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: tenant-entitlement
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods]
+  variables:
+    - name: tenant
+      expression: "namespaceObject.metadata.name"
+    - name: entitledClass
+      expression: "namespaceObject.metadata.labels['platform.example.com/priority-class']"
+    - name: pool
+      expression: "namespaceObject.metadata.labels['platform.example.com/compute-pool']"
+    - name: askedClass
+      expression: "has(object.spec.priorityClassName) ? object.spec.priorityClassName : '<none>'"
+    - name: askedPool
+      expression: >-
+        has(object.spec.nodeSelector) && 'platform.example.com/compute-pool' in object.spec.nodeSelector
+        ? object.spec.nodeSelector['platform.example.com/compute-pool'] : '<none>'
+  validations:
+    - expression: "variables.askedClass == variables.entitledClass"
+      reason: Forbidden
+      messageExpression: >-
+        'tenant ' + variables.tenant + ' is entitled to priorityClassName ' + variables.entitledClass +
+        ', pod asked for ' + variables.askedClass +
+        '. Tier changes are a PR to slice/tenants/' + variables.tenant + '.yaml'
+    - expression: "variables.pool == 'any' || variables.askedPool == variables.pool"
+      reason: Forbidden
+      messageExpression: >-
+        'tenant ' + variables.tenant + ' is pinned to compute pool ' + variables.pool +
+        ', pod must set nodeSelector platform.example.com/compute-pool=' + variables.pool +
+        ' (got ' + variables.askedPool + ')'
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: tenant-entitlement
+spec:
+  policyName: tenant-entitlement
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: platform.example.com/tenant
+          operator: Exists

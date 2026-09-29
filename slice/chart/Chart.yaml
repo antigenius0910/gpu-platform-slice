@@ -1,0 +1,5 @@
+apiVersion: v2
+name: tenant
+description: Renders one team's entitlement (tenants/<team>.yaml) into namespaced Kubernetes objects.
+type: application
+version: 0.1.0

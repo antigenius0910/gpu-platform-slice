@@ -1,0 +1,3 @@
+# Intentionally empty. Every value comes from a tenant spec (tenants/<team>.yaml),
+# and values.schema.json requires all of them, so a spec cannot inherit a default
+# it never stated.

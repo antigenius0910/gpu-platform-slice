@@ -1,0 +1,8 @@
+# Test fixture, not a real team. verify.sh case "overflow" onboards it through the
+# same chart as tenants/*.yaml, uses it, and offboards it. It is the only spec
+# with a required pool, so it shows the failure mode "any" cannot produce.
+name: dc-pinned
+gpuCap: 1
+tier: low
+computePool: datacenter
+networkIsolation: namespace

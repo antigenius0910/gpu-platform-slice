@@ -1,0 +1,20 @@
+# The namespace labels carry the rendered entitlement. Tenants hold no RBAC on
+# namespaces, so they cannot rewrite them; platform/admission-policy.yaml reads
+# them to decide which priority class and pool a pod may use.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.name }}
+  labels:
+    platform.example.com/tenant: {{ .Values.name }}
+    platform.example.com/priority-class: {{ include "tenant.priorityClass" . }}
+    platform.example.com/compute-pool: {{ .Values.computePool }}
+    # No privileged pods, hostPath or host namespaces: any of them turns
+    # "create pod" into root on the node and defeats every other boundary here.
+    pod-security.kubernetes.io/enforce: baseline
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.name }}-sa
+  namespace: {{ .Values.name }}

@@ -1,0 +1,42 @@
+# Runs the same create -> verify -> destroy a reviewer runs locally. CI is
+# evidence, not the entry point: `make verify` on a warm local cluster is.
+name: verify
+on:
+  push:
+    paths: ['slice/**', '.github/workflows/verify.yml']
+  pull_request:
+    paths: ['slice/**', '.github/workflows/verify.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: slice
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k3d v5.8.3 (pinned release binary, no install script)
+        run: |
+          sudo curl -sfLo /usr/local/bin/k3d \
+            https://github.com/k3d-io/k3d/releases/download/v5.8.3/k3d-linux-amd64
+          sudo chmod +x /usr/local/bin/k3d
+          k3d version; kubectl version --client; helm version --short
+
+      - name: Render every tenant spec (schema gate, no cluster)
+        run: make render
+
+      - name: Create
+        run: make create
+
+      - name: Verify
+        run: make verify
+
+      - name: Destroy
+        if: always()
+        run: make destroy

@@ -1,0 +1,10 @@
+# A ceiling on what the team may hold at once, checked at admission. It reserves
+# nothing: with caps summing past the fleet, a team inside its cap can wait.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gpu-cap
+  namespace: {{ .Values.name }}
+spec:
+  hard:
+    requests.nvidia.com/gpu: {{ .Values.gpuCap | quote }}

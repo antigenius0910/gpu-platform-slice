@@ -1,0 +1,8 @@
+# Entitlement for the inference-eval team. Same cap as research, opposite tier:
+# cap and tier are independent knobs, and this team exercises the combination
+# the first two do not. Onboarding it needed this file and nothing else.
+name: inference-eval
+gpuCap: 4
+tier: high
+computePool: any
+networkIsolation: namespace

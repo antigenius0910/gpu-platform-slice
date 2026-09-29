@@ -1,0 +1,8 @@
+# Entitlement changes are platform decisions. A PR that touches a tenant spec,
+# the chart that renders it, or the cluster-wide policy needs a platform owner's
+# approval (enforced once branch protection requires code-owner review).
+# In an organisation this is a team, e.g. @example-org/platform.
+/slice/tenants/    @antigenius0910
+/slice/chart/      @antigenius0910
+/slice/platform/   @antigenius0910
+/.github/          @antigenius0910
