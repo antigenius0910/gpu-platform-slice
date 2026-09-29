@@ -84,13 +84,14 @@ proved the guard works, not the case, so I chose breaks that leave the pools at 
 | **A flag my kubectl accepted and CI's did not.** `kubectl get nodes -L ... -o custom-columns=...` works on my kubectl 1.35 and is rejected on the runner | The first CI run: `--label-columns option cannot be used with custom-columns` | Dropped `-L`. The label was already a column |
 | **Reading a field before it existed.** `create.sh` printed `allocatable` right after patching `capacity` and showed `<none>` | The first `create` output | Wait until the kubelet copies the value into `allocatable`, which is the field the scheduler reads |
 | **Garbled logic in a retry loop.** The first draft of the network case's retry compared two string expansions that did not test anything | Reading the draft before running it | Replaced with a `got_200` helper |
+| **A sentence in the docs that measurement proved wrong.** `ARCHITECTURE.md` said quota stops counting an evicted pod once its grace period passes, so a team's replacement pods would be admitted after a node loss. The agent wrote it from how the quota code reads, and marked it as unmeasured | Measuring node loss on this slice: with a 30s grace period, the evicted pods stayed `Terminating` and every replacement was refused with `exceeded quota`. A team at its cap could not recover its work on another node | The section now describes the lockout and the fix, the `node.kubernetes.io/out-of-service` taint, which released the pods within 15s. `CONTRACT.md` makes applying it the platform's job. Marking the claim as unmeasured is what got it measured |
 | **An intermittent CI failure I have not explained.** In 2 of the first 6 hosted runs, a k3s node failed. In one, no node became Ready within 120s. In the other, `agent-1` became Ready and then stopped posting status 55 seconds later. Private repositories get a 2-CPU runner, and the prototype ran a single node there, so three nodes on 2 CPUs had never been tested | The readiness gate in `create.sh` stopped both runs, so neither could report a result it had not checked | A failure-only CI step now records node conditions, memory, inotify limits, and each node's k3s log. The next 4 runs passed, so there was nothing to read yet. I have not claimed a fix. The local path and the second machine have not shown the failure |
 | **A commit with the wrong author email.** The agent overrode my configured noreply address with my personal one | GitHub refused the push under its email privacy setting | Amended the commit to use the configured identity |
 
 ## Claims in my own inputs that measurement corrected
 
-Three things in the documents I handed the agent were wrong. Each was caught by running
-something, not by reading.
+Four things in the documents I handed the agent were wrong. Three were caught by running
+something. The fourth was caught by checking a citation.
 
 - **"The starved tenant must be research, because a high-tier pod would preempt instead of
   waiting."** In case `capacity`, every GPU is held by high-tier pods, so a high-tier requester
@@ -99,6 +100,11 @@ something, not by reading.
   low-tier pod can never preempt, whoever holds the fleet.
 - **"The pinned pod fails on node affinity rather than `Insufficient nvidia.com/gpu`."** The
   scheduler reports one reason per node, so the message contains both.
+- **"Evicted after 20 seconds, with `default-not-ready-toleration-seconds=20`."** A stopped node is
+  `unreachable`, not `not-ready`. With only that flag set, the pods still carried
+  `unreachable NoExecute 300` and were evicted at t+315s. The prototype must have set both flags,
+  and the notes recorded one. A live demo that followed the notes would have stalled for five
+  minutes.
 - **"The node grace period is 40 seconds."** It has been 50 seconds since Kubernetes 1.32, and
   this cluster runs 1.35. Research with a citation caught it. `production-design.md` now says 50.
 

@@ -115,40 +115,92 @@ removes a component that could silently rewrite their workloads. Production woul
 
 ## When a GPU node disappears
 
-The brief asks about detection, replacement, queued work, and lost progress. The numbers below
-were measured on k3s with the controller timers shortened for the demo.
+The brief asks about detection, replacement, queued work, and lost progress. Everything below
+was measured on this slice's cluster shape, with the timers shortened so the demo takes seconds
+instead of minutes. [How to reproduce it](#reproduce-the-node-loss-measurement) is at the end of
+this section.
 
-**Detection.** The kubelet stops renewing its lease. After `--node-monitor-grace-period`, the
-node lifecycle controller sets the node's `Ready` condition to `Unknown` and adds the taint
-`node.kubernetes.io/unreachable:NoExecute`. With the grace period set to 20s, both appeared at
-about t+19s.
+**Detection.** The kubelet stops renewing its lease. After `--node-monitor-grace-period`
+(50s by default since Kubernetes 1.32, 20s here), the node lifecycle controller sets the node's
+`Ready` condition to `Unknown` and taints it `node.kubernetes.io/unreachable`. The taint appeared
+14 to 20 seconds after the node stopped, depending on how recent its last heartbeat was.
 
-The node's `.status.capacity` does not change. It still reads `nvidia.com/gpu: 4`. The
-scheduler stops placing pods there because of the taint and the `NotReady` condition, not
-because capacity drops to zero.
+The node's `.status.capacity` does not change. It still reads `nvidia.com/gpu: 4`. The scheduler
+stops placing pods there because of the taint and the `NotReady` condition, not because capacity
+drops to zero.
 
-**Running pods.** Every pod gets a default toleration for that taint, 300 seconds unless
-overridden. When it expires, the pod is evicted. With the toleration set to 20s, the pod was
-gone at about t+38s. A Deployment or Job creates a replacement pod, which re-enters scheduling
-with its tier. A bare pod is not replaced.
+**Running pods.** When a pod is created, the API server's `DefaultTolerationSeconds` admission
+plugin gives it a toleration for the `unreachable` taint and one for the `not-ready` taint.
+When the right one expires, the pod is evicted. Which one applies matters: a stopped node is
+`unreachable`, so its timer is `--default-unreachable-toleration-seconds`. With both timers set
+to 20s, the replacement pods were Running on the cloud node at t+38s. With only the `not-ready`
+timer shortened, the pods still carried `unreachable 300` and were evicted at t+315s.
 
-**Queued work.** Replacement pods compete like any other pod. With one of two GPU nodes gone,
-the fleet has 4 GPUs against caps that sum to 14. High-tier replacements preempt low-tier pods
-on the surviving node. Low-tier replacements wait, `Pending`, with a `FailedScheduling` event
-that says `Insufficient nvidia.com/gpu`. Quota stops counting an evicted pod once its deletion
-grace period has passed, even while the pod shows `Terminating` on the lost node, so the
-replacements are not refused at admission. That last point follows from how the quota evaluator
-treats terminating pods. It was not measured in this slice.
+A Deployment or Job creates a replacement pod, which re-enters scheduling with its tier and
+spills to the cloud pool. A bare pod is not replaced.
 
-**Replacement.** The fake GPU capacity lives on the Node object, not in the kubelet. It survives
-a restart of the same node. It is lost when the Node object is recreated, which is what a
-replacement node is. That is why `create.sh` advertises the GPUs on every run, and why
-production uses a device plugin: a DaemonSet re-advertises on every kubelet start, which covers
-both restart and replacement.
+**Queued work, and a quota trap.** An evicted pod on a dead node cannot finish terminating,
+because no kubelet is there to confirm it. With a 30-second grace period, four evicted pods
+stayed `Terminating` for as long as the node was down (70 seconds in the measurement), and quota
+kept counting them. `research` was at its cap of 4, so the ReplicaSet's replacements were
+refused:
+
+```text
+Error creating: pods "trainer-..." is forbidden: exceeded quota: gpu-cap,
+requested: requests.nvidia.com/gpu=1, used: requests.nvidia.com/gpu=4, limited: requests.nvidia.com/gpu=4
+```
+
+So a team at its cap loses its node and then cannot run its work anywhere else. The pods with a
+zero-second grace period were removed at once and did not hit this. Real GPU jobs have a grace
+period to save work, so they do.
+
+The way out is the `node.kubernetes.io/out-of-service` taint, which marks a node as confirmed
+down. After `kubectl taint node <node> node.kubernetes.io/out-of-service=nodeshutdown:NoExecute`,
+the pod garbage collector force-deleted the stuck pods within 15 seconds. The replacements were
+admitted and Running on the cloud node a second later. Only apply the taint to a node that is
+really off: on a node that is only cut off from the network, the old pods may still be running,
+and the taint would start a second copy of each. Applying it is the platform's job, after the
+node is fenced, and [`CONTRACT.md`](CONTRACT.md#what-the-platform-owns) says so.
+
+Once replacements are admitted, they compete like any other pod. With one of two GPU nodes gone,
+the fleet has 4 GPUs against caps that sum to 14. High-tier replacements preempt low-tier pods on
+the surviving node. Low-tier replacements wait with `Insufficient nvidia.com/gpu`.
+
+**Replacement.** The fake GPU capacity lives on the Node object, not in the kubelet. Restarting
+the stopped node kept the same Node object (same UID) and `nvidia.com/gpu: 4`. Deleting the Node
+object and restarting the kubelet produced a new Node object with the same pool label and no GPU
+capacity. Running `create.sh` again put it back. That is why `create.sh` advertises the GPUs on
+every run, and why production uses a device plugin: a DaemonSet re-advertises on every kubelet
+start, which covers both restart and replacement.
 
 **Lost progress.** Everything a GPU job did since its last checkpoint is lost. The platform
 detects the loss and reschedules the pod. It does not checkpoint. Checkpointing is the team's
 job, and the contract says so.
+
+### Reproduce the node loss measurement
+
+This is not a `verify.sh` case. Stopping a node takes a minute and changes the cluster for every
+case that follows. The timers must be set when the cluster is created, so the demo uses its own
+cluster. `create.sh` finds an existing cluster and converges it, so create the cluster first:
+
+```sh
+cd slice
+k3d cluster create nodeloss --image rancher/k3s:v1.35.8-k3s1 --agents 2 \
+  --k3s-node-label "platform.example.com/compute-pool=datacenter@agent:0" \
+  --k3s-node-label "platform.example.com/compute-pool=cloud@agent:1" \
+  --k3s-arg "--disable=traefik@server:*" --k3s-arg "--disable=servicelb@server:*" \
+  --k3s-arg "--kube-controller-manager-arg=node-monitor-grace-period=20s@server:*" \
+  --k3s-arg "--kube-apiserver-arg=default-not-ready-toleration-seconds=20@server:*" \
+  --k3s-arg "--kube-apiserver-arg=default-unreachable-toleration-seconds=20@server:*" \
+  --kubeconfig-update-default=false --kubeconfig-switch-context=false --wait
+CLUSTER=nodeloss ./create.sh
+export KUBECONFIG=~/.kube/k3d-nodeloss.yaml
+```
+
+Then run a `research` Deployment of 4 pods with 1 GPU each, `priorityClassName: tenant-low`, and
+`terminationGracePeriodSeconds: 30`. They land on the datacenter node. Stop that node with
+`docker stop k3d-nodeloss-agent-0` and watch `kubectl get node`, `kubectl -n research get pods`,
+and `kubectl -n research get events`. Clean up with `CLUSTER=nodeloss ./destroy.sh`.
 
 ## Trust assumptions
 
