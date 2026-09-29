@@ -273,8 +273,9 @@ YAML
 case_overflow() {
   expect 'release-evals (pool any = PREFER datacenter) submits 6 x 1 GPU: 4 on the datacenter node, 2 spill to cloud'
   expect 'a tenant pinned to datacenter (REQUIRED) asks for 1 while datacenter is full: Pending, does NOT spill'
+  expect 'a pinned pod that omits the pool nodeSelector: refused by policy tenant-entitlement'
   expect 'its FailedScheduling message cites "didn'"'"'t match Pod'"'"'s node affinity/selector" for the cloud node'
-  local placed on_dc on_cloud uid msg node
+  local placed on_dc on_cloud uid msg node out
   gpu_pods release-evals spill 6
   wait_ready release-evals 60 || { fail "release-evals pods never Ready"; return; }
   kubectl -n release-evals get pods -l "$MARK=true" -o wide | sed 's/^/            /'
@@ -288,6 +289,11 @@ case_overflow() {
 
   # Team N goes through the same code path as teams 1-3: a spec file and onboard().
   onboard "$FIXTURE" >/dev/null || { fail "could not onboard fixture tenant"; return; }
+  # The pin is enforced, not advisory: a pod that omits the pool is refused.
+  out="$(pod_yaml dc-pinned unpinned 1 | grep -v nodeSelector | kubectl create --dry-run=server -f - 2>&1)"
+  show "without nodeSelector: $out"
+  has "$out" "is pinned to compute pool datacenter" && pass "pod without its pool refused by policy" ||
+    fail "not refused by the entitlement policy"
   pod_yaml dc-pinned pinned 1 | kubectl apply -f - >/dev/null || { fail "pinned pod refused"; return; }
   uid="$(uid_of dc-pinned pinned)"
   if msg="$(wait_event dc-pinned "$uid" FailedScheduling 30)"; then

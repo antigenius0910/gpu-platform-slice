@@ -1,0 +1,35 @@
+flowchart TB
+  subgraph git["Git: the trust root"]
+    spec["slice/tenants/&lt;team&gt;.yaml<br/>name · gpuCap · tier · computePool · networkIsolation"]
+    owners["CODEOWNERS<br/>platform approves entitlement changes"]
+  end
+
+  subgraph render["Onboard, any team"]
+    schema["values.schema.json<br/>rejects a bad spec before the cluster sees it"]
+    chart["chart/ templates<br/>tier → PriorityClass map lives here"]
+  end
+
+  subgraph cluster["k3d cluster · k3s v1.35.8"]
+    subgraph tenantns["namespace per team"]
+      labels["namespace labels<br/>tenant · priority-class · compute-pool<br/>Pod Security: baseline"]
+      rbac["Role + RoleBinding<br/>workloads only"]
+      quota["ResourceQuota gpu-cap<br/>requests.nvidia.com/gpu"]
+      netpol["NetworkPolicy<br/>ingress from own namespace only"]
+    end
+
+    subgraph admission["API server admission, in this order"]
+      a1["RBAC"] --> a2["Pod Security"] --> a3["VAP tenant-entitlement<br/>class and pool must match labels"] --> a4["ResourceQuota<br/>GPU cap"]
+    end
+
+    sched["kube-scheduler<br/>tier high preempts tier low<br/>pool any prefers datacenter"]
+    dc["agent-0 · pool=datacenter<br/>nvidia.com/gpu: 4"]
+    cloud["agent-1 · pool=cloud<br/>nvidia.com/gpu: 4"]
+  end
+
+  owners -. reviews .-> spec
+  spec --> schema --> chart -- "kubectl apply" --> tenantns
+  pod(["tenant pod"]) --> a1
+  labels -. read by .-> a3
+  a4 --> sched
+  sched -- "first" --> dc
+  sched -- "when datacenter is full" --> cloud
