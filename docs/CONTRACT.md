@@ -22,7 +22,10 @@ Spending limits over time would need usage metering, which the slice does not ha
 - The cluster-wide admission rules: the `tenant-entitlement` policy and Pod Security
   `baseline` on every tenant namespace.
 - Approval of every entitlement change (see [the seam](#the-seam)).
-- Detection of a lost node and rescheduling of the work that was on it.
+- Detection of a lost node and rescheduling of the work that was on it. That includes marking
+  a node confirmed down with the `node.kubernetes.io/out-of-service` taint. Until then, a
+  team's pods on that node stay `Terminating` and keep counting against its cap, so a team at
+  its cap cannot start replacements anywhere else.
 - The verification suite, and keeping it green after every platform change.
 
 ## What teams control
@@ -87,6 +90,7 @@ both through the same `kubectl` it already uses.
 | Inside the cap, but no free GPU | Pod is `Pending`. `FailedScheduling` event on the pod | `0/3 nodes are available: 3 Insufficient nvidia.com/gpu.` followed by `No preemption victims found for incoming pod` |
 | Pinned pool is full | Pod is `Pending`. `FailedScheduling` event | `1 Insufficient nvidia.com/gpu, 2 node(s) didn't match Pod's node affinity/selector` |
 | Preempted by a higher tier | `Preempted` event on the evicted pod | `Preempted by pod <uid> on node k3d-gpu-slice-agent-0` |
+| A lost node still holds the team's cap | `FailedCreate` event on the team's ReplicaSet or Job | `exceeded quota: gpu-cap, requested: requests.nvidia.com/gpu=1, used: requests.nvidia.com/gpu=4, limited: requests.nvidia.com/gpu=4`. The fix is the platform's: the out-of-service taint above |
 
 Two gaps remain. A `Pending` pod has a reason but no position in a queue and no estimate, and
 nothing escalates a wait that has gone on too long. Both need a queue such as Kueue. Until then,

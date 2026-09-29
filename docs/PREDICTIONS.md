@@ -74,22 +74,29 @@ with 4 fake GPUs each. The spec field `computePool` is `any`, `datacenter`, or `
 
 ## 5. When a GPU node disappears
 
-These were measured on a k3d cluster built like this slice, with the controller timers
-shortened for the demo: `node-monitor-grace-period=20s`, and a pod toleration window of 20s
-(the defaults are tens of seconds and 300s). No `verify.sh` case exercises node loss.
+Measured on 29 September 2026 on clusters built like this slice, with the timers shortened:
+`node-monitor-grace-period=20s` on the controller manager, and
+`default-not-ready-toleration-seconds=20` plus `default-unreachable-toleration-seconds=20` on the
+API server. The defaults are 50s and 300s. No `verify.sh` case stops a node.
+[`ARCHITECTURE.md`](ARCHITECTURE.md#reproduce-the-node-loss-measurement) has the commands. The
+workload was a `research` Deployment on the datacenter node, at the team's cap of 4.
 
 | # | Action | Prediction | Mechanism | Confirming artifact |
 |---|---|---|---|---|
-| 14 | Stop a GPU node | `Ready` becomes `Unknown` and the node is tainted, both at about t+19s | The node lifecycle controller waits out the grace period, then taints | Taint `node.kubernetes.io/unreachable:NoExecute`. **[H]** |
-| 15 | Read `.status.capacity` while the node is unreachable | Unchanged. It still shows the patched value. Scheduling stops because of the taint and `NotReady`, not because capacity became 0 | Nothing zeroes node status when the kubelet goes silent | The field still reads `4`. Say "the scheduler stops placing pods there", never "capacity goes to zero". **[H]** |
-| 16 | Wait past the toleration window | The pod is evicted at about t+38s and a controller-managed workload gets a replacement | The `NoExecute` toleration expires | The pod is gone. A bare pod is not replaced. **[H]** |
-| 17 | Restart the same node | The fake GPU capacity survives | The capacity lives on the Node object, not in the kubelet, and a restart keeps the object | `nvidia.com/gpu: 4` still present. **[H]** |
-| 18 | Delete the Node object and let the kubelet register again | The capacity is lost | A new Node object has no extended resources | The field is absent. This is why `create.sh` advertises the GPUs on every run. **[H]** |
-| 19 | Add a brand-new node | No GPU capacity on it | Same as #18 | The field is absent. **[H]** |
+| 14 | Stop the datacenter node | `Ready` becomes `Unknown` and the node is tainted `unreachable` within the grace period | The node lifecycle controller waits out the grace period after the last heartbeat, then taints | Taint `node.kubernetes.io/unreachable` at t+14s to t+20s across three runs. **[M]** |
+| 15 | Read `.status.capacity` while the node is unreachable | Unchanged. Scheduling stops because of the taint and `NotReady`, not because capacity became 0 | Nothing zeroes node status when the kubelet goes silent | `nvidia.com/gpu: 4` throughout. Say "the scheduler stops placing pods there", never "capacity goes to zero". **[M]** |
+| 15a | Read a pod's tolerations | Two `NoExecute` tolerations, `not-ready` and `unreachable`, each with the API server's default seconds | The `DefaultTolerationSeconds` admission plugin adds them when the pod is created | `node.kubernetes.io/unreachable NoExecute 20`. With only the not-ready flag set, the same pod carried `unreachable NoExecute 300`. **[M]** |
+| 16 | Wait past the toleration window, pods with a 0-second grace period | Evicted, and the Deployment's replacements run on the cloud node | The `unreachable` toleration expires. Preferred affinity lets the replacements spill | Replacements Running at t+38s. The bare pod was not replaced. With only the not-ready timer shortened, eviction came at t+315s. **[M]** |
+| 16a | Same, pods with a 30-second grace period, team at its cap | ~~Replacements are admitted once the grace period passes~~ | | Wrong. See [predictions that were wrong](#predictions-that-were-wrong). **[M]** |
+| 16b | Taint the dead node `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute` | The stuck pods are force-deleted, quota is released, and the replacements run | The pod garbage collector force-deletes pods on an out-of-service node | Stuck pods gone within 15s, 4 replacements Running on the cloud node at 16s. **[M]** |
+| 17 | Restart the same node | The fake GPU capacity survives | The capacity lives on the Node object, not in the kubelet, and a restart keeps the object | Same Node UID, `nvidia.com/gpu: 4`. **[M]** |
+| 18 | Delete the Node object and let the kubelet register again | The capacity is lost | A new Node object has no extended resources | New UID, the pool label back (k3s sets it at registration), no `nvidia.com/gpu`. Running `create.sh` again restored `4`. **[M]** |
+| 19 | Add a brand-new node | No GPU capacity on it | Same as #18 | Not re-run on this slice. **[H]** |
 
 Rows 17 and 18 together are the answer to "what happens when a GPU node disappears". The patch
 survives a restart but not a replacement. That is why production advertises through a device
-plugin: a DaemonSet re-advertises on every kubelet start, which covers both.
+plugin: a DaemonSet re-advertises on every kubelet start, which covers both. Rows 16a and 16b are
+the part I did not predict.
 
 ## 6. Changes a panel may ask for live
 
@@ -122,4 +129,6 @@ Kept on purpose. A predictions file with no misses was written afterwards.
 | `--skip-delete` in the test framework would make the suite much faster | It saves about 8.7s of a 63s run and cannot touch the 24s cluster creation | I reasoned about the flag's purpose instead of measuring its reach |
 | #2a: in case `capacity`, a high-tier requester would preempt instead of waiting, so using `inference-eval` there "would prove the opposite" | It waits too: `No preemption victims found for incoming pod`. Every holder is also high tier, and preemption needs a strictly lower-priority victim | I reasoned from "high tier preempts" without checking who held the GPUs. `research` is still the right requester, for a sturdier reason: a low-tier pod can never preempt, so the case holds whoever holds the fleet |
 | #21: the pinned pod's `FailedScheduling` message would cite node affinity "rather than" `Insufficient nvidia.com/gpu` | It cites both: `1 Insufficient nvidia.com/gpu, 2 node(s) didn't match Pod's node affinity/selector` | The scheduler reports one reason per node. The datacenter node lacks GPUs and the other two fail the selector. The assertion checks for the affinity reason and for an empty `nodeName`, which is what separates the two failure modes |
+| #16a: once an evicted pod's grace period passed, quota would stop counting it, so a team's replacements would be admitted. `ARCHITECTURE.md` said so, marked as unmeasured | The evicted pods stayed `Terminating` for as long as the node was down, quota kept counting them, and every replacement was refused with `exceeded quota`. The `out-of-service` taint released them | I reasoned from how the quota code treats a pod past its deletion time, instead of measuring. I did not dig into why usage stayed at 4. The out-of-service taint is the fix either way, and measuring took one run |
+| The prototype's node-loss notes were complete | They named only `default-not-ready-toleration-seconds`. A stopped node is `unreachable`, and with only that flag set, eviction took 315s, not 38s | The notes recorded the flag I thought mattered, not the flags the run used. A live demo following the notes would have waited five minutes |
 | The first `advertise_fake_gpus` would show `nvidia.com/gpu: 4` right after the patch | It showed `<none>` in `allocatable` for a few seconds | The patch sets `capacity`. The kubelet copies it into `allocatable`, which is what the scheduler reads, on its next status sync. `create.sh` now waits for `allocatable` |

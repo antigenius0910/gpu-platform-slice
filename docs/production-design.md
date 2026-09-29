@@ -630,18 +630,22 @@ t≈50-350s Pods on the node still show Running in the API but are unreachable.
           300s toleration for the unreachable and not-ready taints.
 t≈350s    The taint manager evicts those pods. Controller-owned pods (Job,
           Deployment) get replacement pods, which go through admission and
-          the scheduler as new pods. Bare pods are not recreated.
+          the scheduler as new pods. Bare pods are not recreated. Evicted
+          pods with a grace period stay Terminating, because no kubelet can
+          confirm them, and they keep counting against the team's quota
+          until the node is marked out-of-service (see Queued work).
 ```
 
-**Measured on a k3d cluster built like the slice** (not a `verify.sh` case), with `node-monitor-grace-period=20s` and `default-not-ready-toleration-seconds=20`, after stopping a node:
+**Measured on 29 September 2026 on k3d clusters built like the slice** (not a `verify.sh` case), with `node-monitor-grace-period=20s` on the controller manager and both `default-not-ready-toleration-seconds=20` and `default-unreachable-toleration-seconds=20` on the API server, after stopping the datacenter node. [`ARCHITECTURE.md`](ARCHITECTURE.md#reproduce-the-node-loss-measurement) has the commands.
 
 | Event | Observed |
 |---|---|
-| Ready becomes `Unknown`, `unreachable:NoExecute` taint added | about t+19s |
-| Pod on the stopped node evicted | about t+38s |
+| Ready becomes `Unknown`, `unreachable:NoExecute` taint added | t+14s to t+20s across three runs |
+| Deployment's replacement pods Running on the cloud node (0s grace period) | t+38s |
+| Same, with only the not-ready toleration shortened | t+315s. Each pod still carried `unreachable NoExecute 300` |
 | `.status.capacity` `nvidia.com/gpu` on the stopped node | Still `4` throughout |
 
-A stopped node gets the `unreachable` taint, whose default toleration comes from `default-unreachable-toleration-seconds`, a separate flag from the not-ready one. Shorten both together when reproducing this.
+A stopped node gets the `unreachable` taint, whose default toleration comes from `default-unreachable-toleration-seconds`, a separate flag from the not-ready one. Both are API server flags: the `DefaultTolerationSeconds` admission plugin writes them into each pod when it is created. The earlier notes for this measurement named only the not-ready flag. The measurement above shows that shortening only that one leaves eviction at five minutes.
 
 **On EKS these flags are not settable**, because the control plane is managed. The production lever is per pod: the `tenant-workload` chart sets explicit tolerations for `node.kubernetes.io/unreachable` and `node.kubernetes.io/not-ready` with a short `tolerationSeconds` (for example 60) on GPU Jobs, where waiting five minutes for a dead node to return costs more than rescheduling. Long-running inference Deployments keep the default.
 
@@ -688,7 +692,7 @@ The `gpu-reserved` NodePool draws from an EC2 On-Demand Capacity Reservation. Th
 
 `restartPolicy` does not move a pod. It restarts containers on the same node. A pod is never rescheduled; only a controller creating a new pod gets work onto another node. This is why the `tenant-workload` chart submits GPU work as Jobs, not bare pods.
 
-**Quota and re-submission:** ResourceQuota is charged at admission and counts every non-terminal pod, `Pending` included. A replacement pod passes admission again, so it is refused if the team's other pods have filled its cap in the meantime. Once admitted, it holds its share of the cap while it waits. If another team has taken the recovered GPUs, it waits `Pending` with `Insufficient nvidia.com/gpu`. **A cap is not a queue position or a reservation.**
+**Quota and re-submission:** ResourceQuota is charged at admission and counts every non-terminal pod, `Pending` included. A replacement pod passes admission again. Measured on the slice: evicted pods with a 30s grace period stayed `Terminating` on the dead node and kept counting, so a team at its cap had every replacement refused with `exceeded quota`. Tainting the node `node.kubernetes.io/out-of-service=nodeshutdown:NoExecute` made the pod garbage collector force-delete them within 15s, and the replacements were admitted and running a second later. The platform applies that taint only after it has fenced the node: on a node that is merely partitioned, the old pods may still run, and the taint would start a second copy. In production this belongs in the node-failure runbook, and later in automation that confirms power-off through the BMC or the EC2 API first. Once admitted, it holds its share of the cap while it waits. If another team has taken the recovered GPUs, it waits `Pending` with `Insufficient nvidia.com/gpu`. **A cap is not a queue position or a reservation.**
 
 ### Lost progress
 

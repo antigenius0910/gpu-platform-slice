@@ -110,17 +110,17 @@ TIME-SPENT-TBD
   mutate, so pods state both fields. `docs/CONTRACT.md` lists this as a cost to teams.
 - **Egress isolation, fair share within a tier, and job queueing.** Each is a real production
   need and is named in `docs/ARCHITECTURE.md`. None was needed to prove the brief's boundaries.
-- **A runnable node-failure demo.** The brief makes it optional. The behaviour was measured on
-  the prototype and is written up in `docs/ARCHITECTURE.md`.
+- **Node loss as a `verify.sh` case.** Stopping a node takes a minute and changes the cluster
+  for every case after it. It was measured on this slice instead, and `docs/ARCHITECTURE.md` has
+  the results and the commands to reproduce them.
 - **Dashboards and extra pools.** The brief gives them no credit.
 
 ## The next thing I would check
 
-The node-loss behaviour on this slice, as a seventh `verify.sh` case. It is the one behaviour
-the brief asks about that the suite does not exercise. The measurements in
-[`docs/PREDICTIONS.md`](docs/PREDICTIONS.md#5-when-a-gpu-node-disappears) come from the
-prototype, and one detail is unconfirmed. A stopped node gets the `unreachable` taint, whose
-default toleration is set by `default-unreachable-toleration-seconds`, but the prototype notes
-record only the `not-ready` flag. The case would stop the datacenter agent with both flags
-shortened and assert four things in order: the taint, a capacity that still reads `4`, the
-eviction, and a high-tier replacement preempting on the cloud node.
+Why a k3s node sometimes fails on the hosted CI runner. In 2 of the first 6 runs, one node never
+became Ready or went silent shortly after, and the readiness gate stopped the run. The next runs
+passed. Private repositories get a 2-CPU runner, and none of the other test machines ran
+three k3s nodes on only 2 CPUs. The workflow now
+records node conditions, memory, inotify limits, and each node's k3s log when a step fails. The
+next failure will show whether the node ran out of memory, hit the inotify limit, or something
+else. [`docs/NOTES.md`](docs/NOTES.md#what-went-wrong-in-this-repository) has the details.
