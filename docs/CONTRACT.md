@@ -7,7 +7,9 @@ refused, delayed, or changed. Every message quoted below is copied from a real r
 
 A GPU cap is a ceiling on what a team may hold at one time. It is not capacity set aside for
 that team. The caps add up to 14 GPUs on a fleet of 8, so a team inside its cap can wait,
-and a low-tier team can wait indefinitely.
+and a low-tier team can wait indefinitely. A cap is not a GPU-hour budget either: it limits how
+many GPUs a team holds at once, not for how long. A team can hold its full cap all month.
+Spending limits over time would need usage metering, which the slice does not have.
 
 ## What the platform owns
 
