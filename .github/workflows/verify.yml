@@ -44,7 +44,11 @@ jobs:
           kubectl get nodes -o wide || true
           kubectl describe nodes | grep -A12 '^Conditions' || true
           kubectl get pods -A -o wide || true
-          for n in server-0 agent-0; do
+          nproc; free -m; sysctl fs.inotify.max_user_instances fs.inotify.max_user_watches
+          docker ps -a --format '{{.Names}} {{.Status}}'
+          docker inspect k3d-gpu-slice-agent-1 --format 'agent-1 OOMKilled={{.State.OOMKilled}} ExitCode={{.State.ExitCode}}' || true
+          docker exec k3d-gpu-slice-agent-1 sh -c 'free -m; ps aux | head -20' || true
+          for n in agent-1 server-0; do
             echo "--- k3d-gpu-slice-$n (last 40 lines)"; docker logs k3d-gpu-slice-$n 2>&1 | tail -40
           done
 
