@@ -93,7 +93,7 @@ LoadBalancer, and ServiceLB would bind host ports on the reviewer's machine.
 
 ## Time spent
 
-TIME-SPENT-TBD
+About 2 hours 35 minutes, including the write-up.
 
 ## What I left out on purpose
 
